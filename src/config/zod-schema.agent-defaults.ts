@@ -96,7 +96,9 @@ export const AgentDefaultsSchema = z
         memoryFlush: z
           .object({
             enabled: z.boolean().optional(),
+            mode: z.union([z.literal("reserve-based"), z.literal("token-limit")]).optional(),
             softThresholdTokens: z.number().int().nonnegative().optional(),
+            contextTokenLimit: z.number().int().nonnegative().optional(),
             prompt: z.string().optional(),
             systemPrompt: z.string().optional(),
           })
