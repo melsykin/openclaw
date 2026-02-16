@@ -1,5 +1,6 @@
 import type { ChatType } from "../channels/chat-type.js";
 
+export type MemoryFlushMode = "reserve-based" | "token-limit";
 export type ReplyMode = "text" | "command";
 export type TypingMode = "never" | "instant" | "thinking" | "message";
 export type SessionScope = "per-sender" | "global";
