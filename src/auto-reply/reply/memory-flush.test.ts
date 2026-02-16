@@ -34,3 +34,160 @@ describe("resolveMemoryFlushPromptForRun", () => {
     expect((prompt.match(/Current time:/g) ?? []).length).toBe(1);
   });
 });
+
+describe("memory flush modes", () => {
+  it("defaults to reserve-based mode", () => {
+    const settings = resolveMemoryFlushSettings();
+    expect(settings?.mode).toBe("reserve-based");
+  });
+
+  it("resolves token-limit mode from config", () => {
+    const settings = resolveMemoryFlushSettings({
+      agents: {
+        defaults: {
+          compaction: {
+            memoryFlush: {
+              mode: "token-limit",
+              contextTokenLimit: 100_000,
+            },
+          },
+        },
+      },
+    });
+    expect(settings?.mode).toBe("token-limit");
+    expect(settings?.contextTokenLimit).toBe(100_000);
+  });
+
+  it("reserve-based mode uses original threshold logic", () => {
+    // Below threshold: should not flush
+    expect(
+      shouldRunMemoryFlush({
+        entry: { totalTokens: 50_000 },
+        contextWindowTokens: 100_000,
+        reserveTokensFloor: 20_000,
+        softThresholdTokens: 5_000,
+        mode: "reserve-based",
+      }),
+    ).toBe(false);
+
+    // At/above threshold: should flush
+    expect(
+      shouldRunMemoryFlush({
+        entry: { totalTokens: 75_000, compactionCount: 1 },
+        contextWindowTokens: 100_000,
+        reserveTokensFloor: 20_000,
+        softThresholdTokens: 5_000,
+        mode: "reserve-based",
+      }),
+    ).toBe(true);
+  });
+
+  it("token-limit mode uses absolute contextTokenLimit", () => {
+    // Below limit: should not flush
+    expect(
+      shouldRunMemoryFlush({
+        entry: { totalTokens: 90_000 },
+        contextWindowTokens: 100_000,
+        reserveTokensFloor: 20_000,
+        softThresholdTokens: 5_000,
+        mode: "token-limit",
+        contextTokenLimit: 100_000,
+      }),
+    ).toBe(false);
+
+    // Above limit: should flush
+    expect(
+      shouldRunMemoryFlush({
+        entry: { totalTokens: 105_000, compactionCount: 1 },
+        contextWindowTokens: 100_000,
+        reserveTokensFloor: 20_000,
+        softThresholdTokens: 5_000,
+        mode: "token-limit",
+        contextTokenLimit: 100_000,
+      }),
+    ).toBe(true);
+  });
+
+  it("token-limit mode ignores reserve-based parameters", () => {
+    // Even with high reserve+softThreshold, token-limit mode is independent
+    expect(
+      shouldRunMemoryFlush({
+        entry: { totalTokens: 105_000, compactionCount: 1 },
+        contextWindowTokens: 100_000,
+        reserveTokensFloor: 50_000,
+        softThresholdTokens: 20_000,
+        mode: "token-limit",
+        contextTokenLimit: 100_000,
+      }),
+    ).toBe(true);
+  });
+
+  it("token-limit mode returns false if contextTokenLimit is invalid", () => {
+    expect(
+      shouldRunMemoryFlush({
+        entry: { totalTokens: 90_000 },
+        contextWindowTokens: 100_000,
+        reserveTokensFloor: 20_000,
+        softThresholdTokens: 5_000,
+        mode: "token-limit",
+        contextTokenLimit: null,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldRunMemoryFlush({
+        entry: { totalTokens: 90_000 },
+        contextWindowTokens: 100_000,
+        reserveTokensFloor: 20_000,
+        softThresholdTokens: 5_000,
+        mode: "token-limit",
+        contextTokenLimit: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("still respects memoryFlushCompactionCount in both modes", () => {
+    // reserve-based with prior flush
+    expect(
+      shouldRunMemoryFlush({
+        entry: {
+          totalTokens: 95_000,
+          compactionCount: 2,
+          memoryFlushCompactionCount: 2,
+        },
+        contextWindowTokens: 100_000,
+        reserveTokensFloor: 20_000,
+        softThresholdTokens: 5_000,
+        mode: "reserve-based",
+      }),
+    ).toBe(false);
+
+    // token-limit with prior flush
+    expect(
+      shouldRunMemoryFlush({
+        entry: {
+          totalTokens: 105_000,
+          compactionCount: 2,
+          memoryFlushCompactionCount: 2,
+        },
+        contextWindowTokens: 100_000,
+        reserveTokensFloor: 20_000,
+        softThresholdTokens: 5_000,
+        mode: "token-limit",
+        contextTokenLimit: 100_000,
+      }),
+    ).toBe(false);
+  });
+
+  it("defaults to reserve-based when mode is missing", () => {
+    expect(
+      shouldRunMemoryFlush({
+        entry: { totalTokens: 95_000, compactionCount: 1 },
+        contextWindowTokens: 100_000,
+        reserveTokensFloor: 20_000,
+        softThresholdTokens: 5_000,
+        // mode not provided, should default to reserve-based
+      }),
+    ).toBe(true);
+  });
+});
