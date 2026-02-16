@@ -98,7 +98,7 @@ export const AgentDefaultsSchema = z
             enabled: z.boolean().optional(),
             mode: z.union([z.literal("reserve-based"), z.literal("token-limit")]).optional(),
             softThresholdTokens: z.number().int().nonnegative().optional(),
-            contextTokenLimit: z.number().int().nonnegative().optional(),
+            contextTokenLimit: z.number().int().positive().optional(),
             prompt: z.string().optional(),
             systemPrompt: z.string().optional(),
           })

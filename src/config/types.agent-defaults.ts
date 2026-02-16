@@ -3,6 +3,7 @@ import type {
   BlockStreamingChunkConfig,
   BlockStreamingCoalesceConfig,
   HumanDelayConfig,
+  MemoryFlushMode,
   TypingMode,
 } from "./types.base.js";
 import type {
