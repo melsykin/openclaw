@@ -74,6 +74,8 @@ export async function runMemoryFlushIfNeeded(params: {
       }),
       reserveTokensFloor: memoryFlushSettings.reserveTokensFloor,
       softThresholdTokens: memoryFlushSettings.softThresholdTokens,
+      mode: memoryFlushSettings.mode,
+      contextTokenLimit: memoryFlushSettings.contextTokenLimit,
     });
 
   if (!shouldFlushMemory) {

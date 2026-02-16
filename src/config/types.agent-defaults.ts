@@ -293,8 +293,12 @@ export type AgentCompactionConfig = {
 export type AgentCompactionMemoryFlushConfig = {
   /** Enable the pre-compaction memory flush (default: true). */
   enabled?: boolean;
+  /** Memory flush trigger mode (default: "reserve-based"). */
+  mode?: MemoryFlushMode;
   /** Run the memory flush when context is within this many tokens of the compaction threshold. */
   softThresholdTokens?: number;
+  /** Absolute token limit for "token-limit" mode. */
+  contextTokenLimit?: number;
   /** User prompt used for the memory flush turn (NO_REPLY is enforced if missing). */
   prompt?: string;
   /** System prompt appended for the memory flush turn. */

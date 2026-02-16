@@ -1,3 +1,4 @@
+import type { MemoryFlushMode } from "../../config/types.base.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { lookupContextTokens } from "../../agents/context.js";
 import { resolveCronStyleNow } from "../../agents/current-time.js";
@@ -57,7 +58,9 @@ export function resolveMemoryFlushPromptForRun(params: {
 
 export type MemoryFlushSettings = {
   enabled: boolean;
+  mode: MemoryFlushMode;
   softThresholdTokens: number;
+  contextTokenLimit: number | null;
   prompt: string;
   systemPrompt: string;
   reserveTokensFloor: number;
@@ -77,8 +80,10 @@ export function resolveMemoryFlushSettings(cfg?: OpenClawConfig): MemoryFlushSet
   if (!enabled) {
     return null;
   }
+  const mode: MemoryFlushMode = defaults?.mode ?? "reserve-based";
   const softThresholdTokens =
     normalizeNonNegativeInt(defaults?.softThresholdTokens) ?? DEFAULT_MEMORY_FLUSH_SOFT_TOKENS;
+  const contextTokenLimit = normalizeNonNegativeInt(defaults?.contextTokenLimit);
   const prompt = defaults?.prompt?.trim() || DEFAULT_MEMORY_FLUSH_PROMPT;
   const systemPrompt = defaults?.systemPrompt?.trim() || DEFAULT_MEMORY_FLUSH_SYSTEM_PROMPT;
   const reserveTokensFloor =
@@ -87,7 +92,9 @@ export function resolveMemoryFlushSettings(cfg?: OpenClawConfig): MemoryFlushSet
 
   return {
     enabled,
+    mode,
     softThresholdTokens,
+    contextTokenLimit,
     prompt: ensureNoReplyHint(prompt),
     systemPrompt: ensureNoReplyHint(systemPrompt),
     reserveTokensFloor,
@@ -118,22 +125,38 @@ export function shouldRunMemoryFlush(params: {
   contextWindowTokens: number;
   reserveTokensFloor: number;
   softThresholdTokens: number;
+  mode?: MemoryFlushMode;
+  contextTokenLimit?: number | null;
 }): boolean {
   const totalTokens = resolveFreshSessionTotalTokens(params.entry);
   if (!totalTokens || totalTokens <= 0) {
     return false;
   }
-  const contextWindow = Math.max(1, Math.floor(params.contextWindowTokens));
-  const reserveTokens = Math.max(0, Math.floor(params.reserveTokensFloor));
-  const softThreshold = Math.max(0, Math.floor(params.softThresholdTokens));
-  const threshold = Math.max(0, contextWindow - reserveTokens - softThreshold);
-  if (threshold <= 0) {
-    return false;
+
+  const mode = params.mode ?? "reserve-based";
+  let shouldFlush = false;
+
+  if (mode === "token-limit") {
+    // Token-limit mode: check against absolute contextTokenLimit
+    if (typeof params.contextTokenLimit === "number" && params.contextTokenLimit > 0) {
+      shouldFlush = totalTokens > params.contextTokenLimit;
+    }
+  } else {
+    // reserve-based mode (V1): check against derived threshold
+    const contextWindow = Math.max(1, Math.floor(params.contextWindowTokens));
+    const reserveTokens = Math.max(0, Math.floor(params.reserveTokensFloor));
+    const softThreshold = Math.max(0, Math.floor(params.softThresholdTokens));
+    const threshold = Math.max(0, contextWindow - reserveTokens - softThreshold);
+    if (threshold > 0) {
+      shouldFlush = totalTokens >= threshold;
+    }
   }
-  if (totalTokens < threshold) {
+
+  if (!shouldFlush) {
     return false;
   }
 
+  // Don't re-flush on same compaction
   const compactionCount = params.entry?.compactionCount ?? 0;
   const lastFlushAt = params.entry?.memoryFlushCompactionCount;
   if (typeof lastFlushAt === "number" && lastFlushAt === compactionCount) {
