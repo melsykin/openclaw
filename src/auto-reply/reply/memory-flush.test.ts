@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveMemoryFlushPromptForRun } from "./memory-flush.js";
+import {
+  resolveMemoryFlushPromptForRun,
+  resolveMemoryFlushSettings,
+  shouldRunMemoryFlush,
+} from "./memory-flush.js";
 
 describe("resolveMemoryFlushPromptForRun", () => {
   const cfg = {
