@@ -191,3 +191,26 @@ describe("memory flush modes", () => {
     ).toBe(true);
   });
 });
+
+describe("default mode resolution", () => {
+  it("resolveMemoryFlushSettings defaults mode to reserve-based", () => {
+    const settings = resolveMemoryFlushSettings();
+    expect(settings?.mode).toBe("reserve-based");
+  });
+
+  it("resolveMemoryFlushSettings respects explicit mode in config", () => {
+    const settings = resolveMemoryFlushSettings({
+      agents: {
+        defaults: {
+          compaction: {
+            memoryFlush: {
+              mode: "token-limit",
+              contextTokenLimit: 100_000,
+            },
+          },
+        },
+      },
+    });
+    expect(settings?.mode).toBe("token-limit");
+  });
+});

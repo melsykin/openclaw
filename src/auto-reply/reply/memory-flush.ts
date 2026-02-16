@@ -1,5 +1,5 @@
-import type { MemoryFlushMode } from "../../config/types.base.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import type { MemoryFlushMode } from "../../config/types.base.js";
 import { lookupContextTokens } from "../../agents/context.js";
 import { resolveCronStyleNow } from "../../agents/current-time.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
@@ -74,6 +74,33 @@ const normalizeNonNegativeInt = (value: unknown): number | null => {
   return int >= 0 ? int : null;
 };
 
+/**
+ * Resolve memory flush configuration from OpenClaw config.
+ *
+ * @param cfg - OpenClaw configuration (optional)
+ * @returns MemoryFlushSettings if enabled, null if disabled
+ *
+ * @remarks
+ * - Default mode: "reserve-based" (preserves V1 behavior)
+ * - Mode is independent: reserve-based ignores contextTokenLimit, token-limit ignores reserve params
+ * - All token values are normalized to non-negative integers
+ *
+ * @example
+ * const settings = resolveMemoryFlushSettings({
+ *   agents: {
+ *     defaults: {
+ *       compaction: {
+ *         memoryFlush: {
+ *           mode: "token-limit",
+ *           contextTokenLimit: 100000
+ *         }
+ *       }
+ *     }
+ *   }
+ * });
+ * // settings.mode === "token-limit"
+ * // settings.contextTokenLimit === 100000
+ */
 export function resolveMemoryFlushSettings(cfg?: OpenClawConfig): MemoryFlushSettings | null {
   const defaults = cfg?.agents?.defaults?.compaction?.memoryFlush;
   const enabled = defaults?.enabled ?? true;
@@ -117,6 +144,34 @@ export function resolveMemoryFlushContextWindowTokens(params: {
   );
 }
 
+/**
+ * Determine if memory flush should run based on current mode and token usage.
+ *
+ * @param params - Flush parameters
+ * @param params.mode - Flush trigger mode: "reserve-based" (V1) or "token-limit" (V2)
+ *   - reserve-based: triggers when totalTokens >= (contextWindow - reserveTokens - softThreshold)
+ *   - token-limit: triggers when totalTokens > contextTokenLimit (modes are mutually exclusive)
+ * @returns true if flush should run, false otherwise
+ *
+ * @remarks
+ * Modes are independent: reserve-based ignores contextTokenLimit; token-limit ignores reserve parameters.
+ *
+ * @example
+ * // Reserve-based mode (default)
+ * shouldRunMemoryFlush({
+ *   entry: { totalTokens: 95000 },
+ *   contextWindowTokens: 100000,
+ *   reserveTokensFloor: 20000,
+ *   softThresholdTokens: 5000
+ * }) // → true (threshold is 75000)
+ *
+ * // Token-limit mode
+ * shouldRunMemoryFlush({
+ *   entry: { totalTokens: 105000 },
+ *   contextTokenLimit: 100000,
+ *   mode: "token-limit"
+ * }) // → true (exceeds limit)
+ */
 export function shouldRunMemoryFlush(params: {
   entry?: Pick<
     SessionEntry,
@@ -137,12 +192,14 @@ export function shouldRunMemoryFlush(params: {
   let shouldFlush = false;
 
   if (mode === "token-limit") {
-    // Token-limit mode: check against absolute contextTokenLimit
+    // Token-limit mode: flush when totalTokens exceeds absolute limit.
+    // Note: Modes are mutually exclusive; reserve parameters are ignored.
     if (typeof params.contextTokenLimit === "number" && params.contextTokenLimit > 0) {
       shouldFlush = totalTokens > params.contextTokenLimit;
     }
   } else {
-    // reserve-based mode (V1): check against derived threshold
+    // Reserve-based mode (V1): flush when tokens exceed derived threshold.
+    // Threshold = contextWindow - reserveTokens - softThreshold
     const contextWindow = Math.max(1, Math.floor(params.contextWindowTokens));
     const reserveTokens = Math.max(0, Math.floor(params.reserveTokensFloor));
     const softThreshold = Math.max(0, Math.floor(params.softThresholdTokens));
