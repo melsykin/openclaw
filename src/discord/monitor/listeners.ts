@@ -77,6 +77,8 @@ export function registerDiscordListener(listeners: Array<object>, listener: obje
 }
 
 export class DiscordMessageListener extends MessageCreateListener {
+  private queue: Promise<void> = Promise.resolve();
+
   constructor(
     private handler: DiscordMessageHandler,
     private logger?: Logger,
@@ -86,8 +88,19 @@ export class DiscordMessageListener extends MessageCreateListener {
 
   async handle(data: DiscordMessageEvent, client: Client) {
     const startedAt = Date.now();
-    const task = Promise.resolve(this.handler(data, client));
-    void task
+
+    // Important: Discord gateway heartbeats are sensitive to event-loop load.
+    // If multiple MESSAGE_CREATE events arrive quickly (bursts, large backfills,
+    // or debounce flushes), letting each event fan out into its own async chain
+    // can create unbounded concurrent work.
+    //
+    // We serialize message handling per listener instance to apply backpressure.
+    // The listener framework does not need the handler promise to resolve before
+    // it can process subsequent gateway frames.
+    this.queue = this.queue
+      .then(async () => {
+        await this.handler(data, client);
+      })
       .catch((err) => {
         const logger = this.logger ?? discordEventQueueLog;
         logger.error(danger(`discord handler failed: ${String(err)}`));
