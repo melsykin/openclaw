@@ -93,6 +93,82 @@ describe("DiscordMessageListener", () => {
     await handlerPromise;
   });
 
+  it("does not run handlers concurrently (serializes MESSAGE_CREATE)", async () => {
+    const started: number[] = [];
+    const resolvers: Array<() => void> = [];
+    const gates: Array<Promise<void>> = [];
+    for (let i = 0; i < 2; i++) {
+      gates.push(
+        new Promise<void>((resolve) => {
+          resolvers[i] = resolve;
+        }),
+      );
+    }
+
+    let call = 0;
+    const handler = vi.fn(async () => {
+      const id = call++;
+      started.push(id);
+      await gates[id];
+    });
+    const listener = new DiscordMessageListener(handler);
+
+    await listener.handle(
+      {} as unknown as import("./monitor/listeners.js").DiscordMessageEvent,
+      {} as unknown as import("@buape/carbon").Client,
+    );
+    await listener.handle(
+      {} as unknown as import("./monitor/listeners.js").DiscordMessageEvent,
+      {} as unknown as import("@buape/carbon").Client,
+    );
+
+    // Allow the first queued task to start.
+    await Promise.resolve();
+
+    expect(started).toEqual([0]);
+
+    resolvers[0]?.();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(started).toEqual([0, 1]);
+
+    resolvers[1]?.();
+    await Promise.all(gates);
+  });
+
+  it("continues processing after a handler error (queue is resilient)", async () => {
+    const started: number[] = [];
+    let call = 0;
+    const handler = vi.fn(async () => {
+      const id = call++;
+      started.push(id);
+      if (id == 0) {
+        throw new Error("boom");
+      }
+    });
+    const logger = {
+      warn: vi.fn(),
+      error: vi.fn(),
+    } as unknown as ReturnType<typeof import("../logging/subsystem.js").createSubsystemLogger>;
+    const listener = new DiscordMessageListener(handler, logger);
+
+    await listener.handle(
+      {} as unknown as import("./monitor/listeners.js").DiscordMessageEvent,
+      {} as unknown as import("@buape/carbon").Client,
+    );
+    await listener.handle(
+      {} as unknown as import("./monitor/listeners.js").DiscordMessageEvent,
+      {} as unknown as import("@buape/carbon").Client,
+    );
+
+    // Drain microtasks / queued work.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(started).toEqual([0, 1]);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("discord handler failed"));
+  });
+
   it("logs handler failures", async () => {
     const logger = {
       warn: vi.fn(),
@@ -107,6 +183,8 @@ describe("DiscordMessageListener", () => {
       {} as unknown as import("./monitor/listeners.js").DiscordMessageEvent,
       {} as unknown as import("@buape/carbon").Client,
     );
+    await Promise.resolve();
+    await Promise.resolve();
     await Promise.resolve();
 
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("discord handler failed"));
@@ -139,6 +217,8 @@ describe("DiscordMessageListener", () => {
         (release as () => void)();
       }
       await handlerPromise;
+      await Promise.resolve();
+      await Promise.resolve();
       await Promise.resolve();
 
       expect(logger.warn).toHaveBeenCalled();
